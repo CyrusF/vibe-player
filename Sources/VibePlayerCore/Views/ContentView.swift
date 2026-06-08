@@ -66,6 +66,13 @@ private struct StatusHeaderView: View {
                     .frame(width: 92)
             }
             .buttonStyle(.borderedProminent)
+
+            Button {
+                FishStatsWindowController.shared.show(store: store)
+            } label: {
+                Image(systemName: "chart.xyaxis.line")
+            }
+            .help(store.text(.fishStats))
         }
     }
 

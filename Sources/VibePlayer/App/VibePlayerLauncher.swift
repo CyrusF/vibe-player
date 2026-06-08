@@ -35,4 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainWindowController.shared.show(store: VibePlayerRuntime.store)
         return true
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        VibePlayerRuntime.store.stopDetection()
+    }
 }

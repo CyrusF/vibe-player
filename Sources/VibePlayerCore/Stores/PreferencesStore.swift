@@ -9,6 +9,7 @@ public final class PreferencesStore {
         static let mediaFallback = "mediaFallback"
         static let completedOnboarding = "completedOnboarding"
         static let appLanguage = "appLanguage"
+        static let watchHistory = "watchHistory"
     }
 
     private let defaults: UserDefaults
@@ -82,6 +83,11 @@ public final class PreferencesStore {
             return language
         }
         set { defaults.set(newValue.rawValue, forKey: Key.appLanguage) }
+    }
+
+    public var watchHistory: [VideoWatchEvent] {
+        get { decode([VideoWatchEvent].self, forKey: Key.watchHistory) ?? [] }
+        set { encode(newValue, forKey: Key.watchHistory) }
     }
 
     private func decode<T: Decodable>(_ type: T.Type, forKey key: String) -> T? {

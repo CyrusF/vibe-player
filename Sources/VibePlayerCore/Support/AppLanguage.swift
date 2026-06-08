@@ -35,6 +35,7 @@ public enum AppTextKey: Sendable {
     case previewGlow
     case showDisplayMarkers
     case mediaKeyFallback
+    case openFishStats
     case quit
     case language
     case start
@@ -63,6 +64,14 @@ public enum AppTextKey: Sendable {
     case useSystemPlayPauseFallback
     case fallbackNote
     case noBrowserVideoTargetSelected
+    case fishStats
+    case todayWatchTime
+    case weekWatchTime
+    case recentWatchSessions
+    case noWatchHistory
+    case clearWatchHistory
+    case activeNow
+    case last14Days
     case allowed
     case notRequested
     case deniedInSystemSettings
@@ -353,6 +362,8 @@ public extension AppLanguage {
             return "Show Display Markers"
         case .mediaKeyFallback:
             return "Media Key Fallback"
+        case .openFishStats:
+            return "Open Thinking Stat"
         case .quit:
             return "Quit"
         case .language:
@@ -409,6 +420,22 @@ public extension AppLanguage {
             return "The fallback is global and can affect music apps. It is used only after targeted browser video control fails."
         case .noBrowserVideoTargetSelected:
             return "No browser video target selected."
+        case .fishStats:
+            return "Thinking Stat"
+        case .todayWatchTime:
+            return "Today"
+        case .weekWatchTime:
+            return "This Week"
+        case .recentWatchSessions:
+            return "Recent Watch Sessions"
+        case .noWatchHistory:
+            return "No watch history yet."
+        case .clearWatchHistory:
+            return "Clear History"
+        case .activeNow:
+            return "Active now"
+        case .last14Days:
+            return "Last 14 Days"
         case .allowed:
             return "Allowed"
         case .notRequested:
@@ -478,6 +505,8 @@ public extension AppLanguage {
             return "显示屏幕标记"
         case .mediaKeyFallback:
             return "媒体键备用控制"
+        case .openFishStats:
+            return "打开摸鱼统计"
         case .quit:
             return "退出"
         case .language:
@@ -534,6 +563,22 @@ public extension AppLanguage {
             return "备用控制是全局操作，可能影响音乐 App。它只会在定向浏览器视频控制失败后使用。"
         case .noBrowserVideoTargetSelected:
             return "尚未选择浏览器视频目标。"
+        case .fishStats:
+            return "摸鱼统计"
+        case .todayWatchTime:
+            return "今日"
+        case .weekWatchTime:
+            return "本周"
+        case .recentWatchSessions:
+            return "最近观看记录"
+        case .noWatchHistory:
+            return "暂时还没有观看记录。"
+        case .clearWatchHistory:
+            return "清空记录"
+        case .activeNow:
+            return "正在观看"
+        case .last14Days:
+            return "最近 14 天"
         case .allowed:
             return "已允许"
         case .notRequested:

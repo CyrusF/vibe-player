@@ -39,6 +39,8 @@ public final class AppStore: ObservableObject {
     @Published public private(set) var calibrationProgress: Double = 0
     @Published public private(set) var calibrationMessage = "Record one play clip and three away clips."
     @Published public private(set) var hasCompletedOnboarding: Bool
+    @Published public private(set) var watchHistory: [VideoWatchEvent]
+    @Published public private(set) var activeWatchSession: ActiveVideoWatchSession?
 
     public let cameraMonitor: CameraFocusMonitor
 
@@ -55,6 +57,8 @@ public final class AppStore: ObservableObject {
     private var captureSamples: [FaceFeatures] = []
     private var captureTask: Task<Void, Never>?
     private var resumeRetryTask: Task<Void, Never>?
+    private let now: @MainActor () -> Date
+    private let watchHistoryLimit = 600
 
     public static func live() -> AppStore {
         AppStore()
@@ -67,7 +71,8 @@ public final class AppStore: ObservableObject {
         overlayService: OverlayService? = nil,
         cameraMonitor: CameraFocusMonitor = CameraFocusMonitor(),
         playerController: PlayerControlling = BrowserVideoController(),
-        mediaKeyService: MediaKeyControlling = MediaKeyService()
+        mediaKeyService: MediaKeyControlling = MediaKeyService(),
+        now: @escaping @MainActor () -> Date = Date.init
     ) {
         self.preferences = preferences
         self.permissionService = permissionService
@@ -76,6 +81,7 @@ public final class AppStore: ObservableObject {
         self.cameraMonitor = cameraMonitor
         self.playerController = playerController
         self.mediaKeyService = mediaKeyService
+        self.now = now
 
         self.permissions = permissionService.snapshot()
         self.displays = displayService.displays()
@@ -89,6 +95,7 @@ public final class AppStore: ObservableObject {
         self.statusDetail = appLanguage.text(.ready)
         self.calibrationMessage = appLanguage.text(.calibrationInstructions)
         self.hasCompletedOnboarding = preferences.completedOnboarding
+        self.watchHistory = preferences.watchHistory
 
         cameraMonitor.onFeature = { [weak self] result in
             Task { @MainActor in
@@ -124,6 +131,39 @@ public final class AppStore: ObservableObject {
 
     public func displayName(for display: DisplayInfo) -> String {
         language.displayName(for: display)
+    }
+
+    public var watchHistoryByDay: [VideoWatchDay] {
+        dailyWatchHistory(forPastDays: 14)
+    }
+
+    public var totalWatchDurationToday: TimeInterval {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now())
+        return watchHistory.reduce(0) { total, event in
+            calendar.isDate(event.startedAt, inSameDayAs: today) ? total + event.duration : total
+        } + activeWatchDurationForDay(today, calendar: calendar)
+    }
+
+    public var totalWatchDurationThisWeek: TimeInterval {
+        let calendar = Calendar.current
+        let currentDate = now()
+        guard let interval = calendar.dateInterval(of: .weekOfYear, for: currentDate) else {
+            return totalWatchDurationToday
+        }
+        return watchHistory.reduce(0) { total, event in
+            event.startedAt >= interval.start && event.startedAt < interval.end ? total + event.duration : total
+        } + (activeWatchSession.map { session in
+            session.startedAt >= interval.start && session.startedAt < interval.end
+                ? max(0, currentDate.timeIntervalSince(session.startedAt))
+                : 0
+        } ?? 0)
+    }
+
+    public func clearWatchHistory() {
+        activeWatchSession = nil
+        watchHistory = []
+        preferences.watchHistory = []
     }
 
     public func setLanguage(_ language: AppLanguage) {
@@ -218,6 +258,7 @@ public final class AppStore: ObservableObject {
         previousStatus = .unknown
         status = .unknown
         statusDetail = text(.detectionPaused)
+        finishActiveWatchSession(at: now())
     }
 
     public func resetCalibration() {
@@ -350,6 +391,7 @@ public final class AppStore: ObservableObject {
             statusDetail = text(.noBrowserVideoTargetSelected)
             return
         }
+        let eventDate = now()
         resumeRetryTask?.cancel()
         resumeRetryTask = nil
         pendingResumeTargetID = nil
@@ -358,15 +400,20 @@ public final class AppStore: ObservableObject {
             if result.ok && result.changed {
                 lastAutoPausedTargetID = target.id
                 statusDetail = text(.pausedSelectedVideo)
+                finishActiveWatchSession(at: eventDate)
             } else {
                 lastAutoPausedTargetID = nil
                 statusDetail = language.videoReason(result.reason) ?? text(.selectedVideoAlreadyPaused)
+                if result.ok && result.isPaused == true {
+                    finishActiveWatchSession(at: eventDate)
+                }
             }
         case .failure(let error):
             if mediaKeyFallbackEnabled {
                 mediaKeyService.sendPlayPause()
                 lastAutoPausedTargetID = target.id
                 statusDetail = language.sentMediaFallback(after: language.playerControlErrorDescription(error))
+                finishActiveWatchSession(at: eventDate)
             } else {
                 statusDetail = language.playerControlErrorDescription(error)
             }
@@ -377,6 +424,7 @@ public final class AppStore: ObservableObject {
         guard let target = selectedTarget else {
             return
         }
+        let eventDate = now()
         let isAppResume = lastAutoPausedTargetID == target.id
         pendingResumeTargetID = target.id
         resumeRetryTask?.cancel()
@@ -386,6 +434,7 @@ public final class AppStore: ObservableObject {
             if result.ok && result.isPaused == false {
                 clearResumeState(for: target)
                 statusDetail = isAppResume ? text(.resumedSelectedVideo) : text(.startedSelectedVideo)
+                beginWatchSessionIfNeeded(target: target, at: eventDate)
             } else {
                 statusDetail = language.videoReason(result.reason) ?? text(.resumeRequestedVerifyingPlayback)
                 scheduleResumeVerification(target: target, attemptsRemaining: 2)
@@ -394,6 +443,7 @@ public final class AppStore: ObservableObject {
             if mediaKeyFallbackEnabled {
                 mediaKeyService.sendPlayPause()
                 statusDetail = language.sentMediaFallback(after: language.playerControlErrorDescription(error))
+                beginWatchSessionIfNeeded(target: target, at: eventDate)
                 scheduleResumeVerification(target: target, attemptsRemaining: 0)
             } else {
                 statusDetail = language.playerControlErrorDescription(error)
@@ -419,6 +469,7 @@ public final class AppStore: ObservableObject {
             if result.ok && result.isPaused == false {
                 clearResumeState(for: target)
                 statusDetail = text(.resumedSelectedVideo)
+                beginWatchSessionIfNeeded(target: target, at: now())
                 return
             }
 
@@ -429,6 +480,7 @@ public final class AppStore: ObservableObject {
                     if retryResult.ok && retryResult.isPaused == false {
                         clearResumeState(for: target)
                         statusDetail = text(.resumedSelectedVideo)
+                        beginWatchSessionIfNeeded(target: target, at: now())
                     } else {
                         scheduleResumeVerification(target: target, attemptsRemaining: attemptsRemaining - 1)
                     }
@@ -468,6 +520,7 @@ public final class AppStore: ObservableObject {
                 case .success(let result) where result.isPaused == false:
                     self.clearResumeState(for: target)
                     self.statusDetail = self.text(.resumedSelectedVideo)
+                    self.beginWatchSessionIfNeeded(target: target, at: self.now())
                 case .success:
                     self.statusDetail = self.text(.mediaKeyFallbackDidNotConfirm)
                 case .failure(let error):
@@ -535,5 +588,79 @@ public final class AppStore: ObservableObject {
         if lastAutoPausedTargetID == target.id {
             lastAutoPausedTargetID = nil
         }
+    }
+
+    private func beginWatchSessionIfNeeded(target: PlayerTarget, at date: Date) {
+        if let activeWatchSession,
+           activeWatchSession.url == target.url,
+           activeWatchSession.title == target.title {
+            return
+        }
+
+        finishActiveWatchSession(at: date)
+        activeWatchSession = ActiveVideoWatchSession(
+            startedAt: date,
+            title: target.title,
+            url: target.url,
+            browserName: target.browser.displayName
+        )
+    }
+
+    private func finishActiveWatchSession(at date: Date) {
+        guard let session = activeWatchSession else { return }
+        activeWatchSession = nil
+
+        guard date.timeIntervalSince(session.startedAt) >= 5 else { return }
+        watchHistory.append(VideoWatchEvent(
+            startedAt: session.startedAt,
+            endedAt: date,
+            title: session.title,
+            url: session.url,
+            browserName: session.browserName
+        ))
+        if watchHistory.count > watchHistoryLimit {
+            watchHistory.removeFirst(watchHistory.count - watchHistoryLimit)
+        }
+        preferences.watchHistory = watchHistory
+    }
+
+    private func dailyWatchHistory(forPastDays dayCount: Int) -> [VideoWatchDay] {
+        let calendar = Calendar.current
+        let currentDate = now()
+        let today = calendar.startOfDay(for: currentDate)
+        let start = calendar.date(byAdding: .day, value: -(dayCount - 1), to: today) ?? today
+        var buckets: [Date: TimeInterval] = [:]
+
+        for offset in 0..<dayCount {
+            if let date = calendar.date(byAdding: .day, value: offset, to: start) {
+                buckets[date] = 0
+            }
+        }
+
+        for event in watchHistory {
+            let day = calendar.startOfDay(for: event.startedAt)
+            guard day >= start && day <= today else { continue }
+            buckets[day, default: 0] += event.duration
+        }
+
+        if let activeWatchSession {
+            let day = calendar.startOfDay(for: activeWatchSession.startedAt)
+            if day >= start && day <= today {
+                buckets[day, default: 0] += max(0, currentDate.timeIntervalSince(activeWatchSession.startedAt))
+            }
+        }
+
+        return (0..<dayCount).compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+            return VideoWatchDay(date: date, duration: buckets[date, default: 0])
+        }
+    }
+
+    private func activeWatchDurationForDay(_ day: Date, calendar: Calendar) -> TimeInterval {
+        guard let activeWatchSession,
+              calendar.isDate(activeWatchSession.startedAt, inSameDayAs: day) else {
+            return 0
+        }
+        return max(0, now().timeIntervalSince(activeWatchSession.startedAt))
     }
 }

@@ -56,6 +56,7 @@ public final class StatusBarController: NSObject, NSMenuDelegate {
     private func showContextMenu() {
         let menu = NSMenu()
         menu.addItem(item(title: store.text(.openVibePlayer), action: #selector(openMainWindow(_:))))
+        menu.addItem(item(title: store.text(.openFishStats), action: #selector(openFishStats(_:))))
         menu.addItem(.separator())
 
         let status = NSMenuItem(title: store.statusTitle(store.status), action: nil, keyEquivalent: "")
@@ -144,6 +145,10 @@ public final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc private func openMainWindow(_ sender: NSMenuItem) {
         MainWindowController.shared.show(store: store)
+    }
+
+    @objc private func openFishStats(_ sender: NSMenuItem) {
+        FishStatsWindowController.shared.show(store: store)
     }
 
     @objc private func showDisplayMarkers(_ sender: NSMenuItem) {
