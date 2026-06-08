@@ -72,6 +72,12 @@ public enum AppTextKey: Sendable {
     case clearWatchHistory
     case activeNow
     case last14Days
+    case last7Days
+    case last24Hours
+    case last60Minutes
+    case historyVisibleMode
+    case historyHiddenMode
+    case historyMaskedMode
     case allowed
     case notRequested
     case deniedInSystemSettings
@@ -89,6 +95,11 @@ public enum AppTextKey: Sendable {
     case recordPlayBeforeAwayClips
     case calibrationComplete
     case pausedSelectedVideo
+    case pauseSuppressedByRightShift
+    case rightShiftPauseBypass
+    case rightShiftPauseBypassActive
+    case refreshTarget
+    case targetRefreshed
     case selectedVideoAlreadyPaused
     case resumedSelectedVideo
     case startedSelectedVideo
@@ -436,6 +447,18 @@ public extension AppLanguage {
             return "Active now"
         case .last14Days:
             return "Last 14 Days"
+        case .last7Days:
+            return "Last 7 Days"
+        case .last24Hours:
+            return "Last 24 Hours"
+        case .last60Minutes:
+            return "Last 60 Minutes"
+        case .historyVisibleMode:
+            return "Playback History"
+        case .historyHiddenMode:
+            return "Hide Playback History"
+        case .historyMaskedMode:
+            return "Masked Titles"
         case .allowed:
             return "Allowed"
         case .notRequested:
@@ -470,6 +493,16 @@ public extension AppLanguage {
             return "Calibration complete."
         case .pausedSelectedVideo:
             return "Paused selected video."
+        case .pauseSuppressedByRightShift:
+            return "Pause skipped while Right Shift is held."
+        case .rightShiftPauseBypass:
+            return "Hold Right Shift to glance without pausing."
+        case .rightShiftPauseBypassActive:
+            return "Right Shift pause bypass is active."
+        case .refreshTarget:
+            return "Refresh Target"
+        case .targetRefreshed:
+            return "Target refreshed."
         case .selectedVideoAlreadyPaused:
             return "Selected video was already paused."
         case .resumedSelectedVideo:
@@ -579,6 +612,18 @@ public extension AppLanguage {
             return "正在观看"
         case .last14Days:
             return "最近 14 天"
+        case .last7Days:
+            return "最近 7 天"
+        case .last24Hours:
+            return "最近 24 小时"
+        case .last60Minutes:
+            return "最近 60 分钟"
+        case .historyVisibleMode:
+            return "播放历史"
+        case .historyHiddenMode:
+            return "隐藏播放历史"
+        case .historyMaskedMode:
+            return "标题打码"
         case .allowed:
             return "已允许"
         case .notRequested:
@@ -613,6 +658,16 @@ public extension AppLanguage {
             return "校准完成。"
         case .pausedSelectedVideo:
             return "已暂停所选视频。"
+        case .pauseSuppressedByRightShift:
+            return "按住右 Shift，已跳过本次暂停。"
+        case .rightShiftPauseBypass:
+            return "按住右 Shift 可临时看一眼屏幕且不暂停。"
+        case .rightShiftPauseBypassActive:
+            return "右 Shift 防暂停已生效。"
+        case .refreshTarget:
+            return "刷新目标"
+        case .targetRefreshed:
+            return "播放目标已刷新。"
         case .selectedVideoAlreadyPaused:
             return "所选视频已经暂停。"
         case .resumedSelectedVideo:

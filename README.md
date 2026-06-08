@@ -7,7 +7,9 @@ The MVP runs fully on-device:
 - AVFoundation captures low-resolution camera frames.
 - Apple Vision extracts face and eye geometry.
 - A personal calibration classifies whether the user is looking at the selected playback screen.
-- Apple Events control the selected Chrome/Safari video tab without a browser extension.
+- Apple Events control the selected browser video tab without a browser extension.
+- Hold Right Shift to temporarily bypass auto-pause; the playback display edge glow stays lit while the bypass is active.
+- Thinking Stat records local watch sessions with selectable time ranges, grouped history, title masking, and hideable playback history.
 - A system Play/Pause media key fallback is available but disabled by default.
 
 ## Build and Run

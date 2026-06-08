@@ -88,6 +88,7 @@ public enum GlowStyle: Equatable, Sendable {
 public final class OverlayService {
     private var markerWindows: [NSWindow] = []
     private var glowWindow: NSWindow?
+    private var persistentGlowWindow: NSWindow?
 
     public init() {}
 
@@ -159,6 +160,49 @@ public final class OverlayService {
                     }
                 }
             }
+        }
+    }
+
+    public func showPersistentGlow(on screen: NSScreen?, style: GlowStyle) {
+        guard let screen else { return }
+        if let persistentGlowWindow,
+           persistentGlowWindow.frame == screen.frame {
+            return
+        }
+
+        hidePersistentGlow()
+
+        let window = NSPanel(
+            contentRect: screen.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        window.level = .screenSaver
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.ignoresMouseEvents = true
+        window.hasShadow = false
+        window.contentView = NSHostingView(rootView: EdgeGlowView(style: style))
+        window.alphaValue = 0
+        window.orderFrontRegardless()
+        persistentGlowWindow = window
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            window.animator().alphaValue = 1
+        }
+    }
+
+    public func hidePersistentGlow() {
+        guard let window = persistentGlowWindow else { return }
+        persistentGlowWindow = nil
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            window.animator().alphaValue = 0
+        } completionHandler: {
+            window.orderOut(nil)
         }
     }
 }

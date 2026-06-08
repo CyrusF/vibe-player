@@ -1,5 +1,7 @@
 import AVFoundation
 import Combine
+import AppKit
+import CoreGraphics
 import Foundation
 
 @MainActor
@@ -41,6 +43,7 @@ public final class AppStore: ObservableObject {
     @Published public private(set) var hasCompletedOnboarding: Bool
     @Published public private(set) var watchHistory: [VideoWatchEvent]
     @Published public private(set) var activeWatchSession: ActiveVideoWatchSession?
+    @Published public private(set) var isPauseBypassActive = false
 
     public let cameraMonitor: CameraFocusMonitor
 
@@ -57,6 +60,7 @@ public final class AppStore: ObservableObject {
     private var captureSamples: [FaceFeatures] = []
     private var captureTask: Task<Void, Never>?
     private var resumeRetryTask: Task<Void, Never>?
+    private var modifierMonitors: [Any] = []
     private let now: @MainActor () -> Date
     private let watchHistoryLimit = 600
 
@@ -107,6 +111,9 @@ public final class AppStore: ObservableObject {
     deinit {
         captureTask?.cancel()
         resumeRetryTask?.cancel()
+        for monitor in modifierMonitors {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 
     public func text(_ key: AppTextKey) -> String {
@@ -135,6 +142,18 @@ public final class AppStore: ObservableObject {
 
     public var watchHistoryByDay: [VideoWatchDay] {
         dailyWatchHistory(forPastDays: 14)
+    }
+
+    public var watchHistoryLast7Days: [VideoWatchPoint] {
+        watchHistoryPoints(component: .day, count: 7)
+    }
+
+    public var watchHistoryLast24Hours: [VideoWatchPoint] {
+        watchHistoryPoints(component: .hour, count: 24)
+    }
+
+    public var watchHistoryLast60Minutes: [VideoWatchPoint] {
+        watchHistoryPoints(component: .minute, count: 60)
     }
 
     public var totalWatchDurationToday: TimeInterval {
@@ -220,9 +239,23 @@ public final class AppStore: ObservableObject {
     public func captureTarget(in browser: BrowserKind) {
         switch playerController.captureActiveTarget(in: browser) {
         case .success(let target):
-            selectedTarget = target
-            preferences.target = target
+            updateSelectedTarget(target)
             statusDetail = language.capturedTarget(browserName: browser.displayName, title: target.title)
+        case .failure(let error):
+            statusDetail = language.playerControlErrorDescription(error)
+        }
+    }
+
+    public func refreshSelectedTarget() {
+        guard let target = selectedTarget else {
+            statusDetail = text(.noBrowserVideoTargetSelected)
+            return
+        }
+
+        switch playerController.refreshTarget(target) {
+        case .success(let refreshed):
+            updateSelectedTarget(refreshed)
+            statusDetail = text(.targetRefreshed)
         case .failure(let error):
             statusDetail = language.playerControlErrorDescription(error)
         }
@@ -245,6 +278,8 @@ public final class AppStore: ObservableObject {
         previousStatus = .unknown
         status = .unknown
         statusDetail = text(.detectionRunning)
+        updatePauseBypassState()
+        startModifierMonitor()
         cameraMonitor.start()
     }
 
@@ -259,6 +294,9 @@ public final class AppStore: ObservableObject {
         status = .unknown
         statusDetail = text(.detectionPaused)
         finishActiveWatchSession(at: now())
+        stopModifierMonitor()
+        isPauseBypassActive = false
+        overlayService.hidePersistentGlow()
     }
 
     public func resetCalibration() {
@@ -387,7 +425,12 @@ public final class AppStore: ObservableObject {
     }
 
     private func pauseIfNeeded() {
-        guard let target = selectedTarget else {
+        updatePauseBypassState()
+        guard !isPauseBypassActive else {
+            statusDetail = text(.pauseSuppressedByRightShift)
+            return
+        }
+        guard let target = refreshedSelectedTargetForControl() else {
             statusDetail = text(.noBrowserVideoTargetSelected)
             return
         }
@@ -421,7 +464,7 @@ public final class AppStore: ObservableObject {
     }
 
     private func resumeIfNeeded() {
-        guard let target = selectedTarget else {
+        guard let target = refreshedSelectedTargetForControl() else {
             return
         }
         let eventDate = now()
@@ -534,7 +577,7 @@ public final class AppStore: ObservableObject {
         statusDetail = relocalized(
             statusDetail,
             from: oldLanguage,
-            matching: [
+        matching: [
                 .ready,
                 .cameraPermissionRequired,
                 .calibrationRequiredBeforeDetection,
@@ -542,6 +585,9 @@ public final class AppStore: ObservableObject {
                 .detectionPaused,
                 .noBrowserVideoTargetSelected,
                 .pausedSelectedVideo,
+                .pauseSuppressedByRightShift,
+                .rightShiftPauseBypassActive,
+                .targetRefreshed,
                 .selectedVideoAlreadyPaused,
                 .resumedSelectedVideo,
                 .startedSelectedVideo,
@@ -606,6 +652,30 @@ public final class AppStore: ObservableObject {
         )
     }
 
+    private func updateSelectedTarget(_ target: PlayerTarget) {
+        selectedTarget = target
+        preferences.target = target
+        if let activeWatchSession {
+            self.activeWatchSession = ActiveVideoWatchSession(
+                startedAt: activeWatchSession.startedAt,
+                title: target.title,
+                url: target.url,
+                browserName: target.browser.displayName
+            )
+        }
+    }
+
+    private func refreshedSelectedTargetForControl() -> PlayerTarget? {
+        guard let target = selectedTarget else { return nil }
+        switch playerController.refreshTarget(target) {
+        case .success(let refreshed):
+            updateSelectedTarget(refreshed)
+            return refreshed
+        case .failure:
+            return target
+        }
+    }
+
     private func finishActiveWatchSession(at date: Date) {
         guard let session = activeWatchSession else { return }
         activeWatchSession = nil
@@ -662,5 +732,85 @@ public final class AppStore: ObservableObject {
             return 0
         }
         return max(0, now().timeIntervalSince(activeWatchSession.startedAt))
+    }
+
+    private func startModifierMonitor() {
+        guard modifierMonitors.isEmpty else { return }
+        let localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            Task { @MainActor in
+                self?.updatePauseBypassState(from: event)
+            }
+            return event
+        }
+        let globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            Task { @MainActor in
+                self?.updatePauseBypassState(from: event)
+            }
+        }
+        modifierMonitors = [localMonitor, globalMonitor].compactMap { $0 }
+    }
+
+    private func stopModifierMonitor() {
+        for monitor in modifierMonitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        modifierMonitors.removeAll()
+    }
+
+    private func updatePauseBypassState(from event: NSEvent? = nil) {
+        let active = event.map(isRightShiftEvent) ?? isRightShiftPressed
+        guard isPauseBypassActive != active else { return }
+        isPauseBypassActive = active
+        if active {
+            statusDetail = text(.rightShiftPauseBypassActive)
+            overlayService.showPersistentGlow(on: displayService.screen(for: selectedDisplayID), style: .active)
+        } else if statusDetail == text(.rightShiftPauseBypassActive) {
+            statusDetail = text(.detectionRunning)
+            overlayService.hidePersistentGlow()
+        } else {
+            overlayService.hidePersistentGlow()
+        }
+    }
+
+    private func isRightShiftEvent(_ event: NSEvent) -> Bool {
+        let rightShiftMask = NSEvent.ModifierFlags(rawValue: UInt(NX_DEVICERSHIFTKEYMASK))
+        return event.modifierFlags.contains(rightShiftMask)
+    }
+
+    private var isRightShiftPressed: Bool {
+        let rightShiftMask = CGEventFlags(rawValue: UInt64(NX_DEVICERSHIFTKEYMASK))
+        return CGEventSource.flagsState(.hidSystemState).contains(rightShiftMask)
+    }
+
+    private func watchHistoryPoints(component: Calendar.Component, count: Int) -> [VideoWatchPoint] {
+        let calendar = Calendar.current
+        let currentDate = now()
+        let currentBucket = calendar.dateInterval(of: component, for: currentDate)?.start ?? currentDate
+        let start = calendar.date(byAdding: component, value: -(count - 1), to: currentBucket) ?? currentBucket
+        var buckets: [Date: TimeInterval] = [:]
+
+        for offset in 0..<count {
+            if let date = calendar.date(byAdding: component, value: offset, to: start) {
+                buckets[date] = 0
+            }
+        }
+
+        for event in watchHistory {
+            let bucket = calendar.dateInterval(of: component, for: event.startedAt)?.start ?? event.startedAt
+            guard bucket >= start && bucket <= currentBucket else { continue }
+            buckets[bucket, default: 0] += event.duration
+        }
+
+        if let activeWatchSession {
+            let bucket = calendar.dateInterval(of: component, for: activeWatchSession.startedAt)?.start ?? activeWatchSession.startedAt
+            if bucket >= start && bucket <= currentBucket {
+                buckets[bucket, default: 0] += max(0, currentDate.timeIntervalSince(activeWatchSession.startedAt))
+            }
+        }
+
+        return (0..<count).compactMap { offset in
+            guard let date = calendar.date(byAdding: component, value: offset, to: start) else { return nil }
+            return VideoWatchPoint(date: date, duration: buckets[date, default: 0])
+        }
     }
 }

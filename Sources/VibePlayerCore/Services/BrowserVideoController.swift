@@ -57,6 +57,7 @@ public enum PlayerControlError: LocalizedError, Equatable {
 
 public protocol PlayerControlling {
     func captureActiveTarget(in browser: BrowserKind) -> Result<PlayerTarget, PlayerControlError>
+    func refreshTarget(_ target: PlayerTarget) -> Result<PlayerTarget, PlayerControlError>
     func control(_ action: VideoControlAction, target: PlayerTarget) -> Result<VideoControlResult, PlayerControlError>
 }
 
@@ -78,23 +79,24 @@ public final class BrowserVideoController: PlayerControlling {
         case .failure(let error):
             return .failure(error)
         case .success(let value):
-            let parts = value.components(separatedBy: "\t")
-            guard parts.count >= 4 else {
-                return .failure(.badResponse(value))
-            }
-            if parts[0] == "ERROR" {
-                return .failure(.noTarget(parts.dropFirst().joined(separator: " ")))
-            }
-            guard let windowIndex = Int(parts[0]), let tabIndex = Int(parts[1]) else {
-                return .failure(.badResponse(value))
-            }
-            return .success(PlayerTarget(
-                browser: browser,
-                windowIndex: windowIndex,
-                tabIndex: tabIndex,
-                title: parts[2],
-                url: parts.dropFirst(3).joined(separator: "\t")
-            ))
+            return parseTargetResponse(value, browser: browser)
+        }
+    }
+
+    public func refreshTarget(_ target: PlayerTarget) -> Result<PlayerTarget, PlayerControlError> {
+        guard isBrowserRunning(target.browser) else {
+            return .failure(.browserNotRunning(target.browser.displayName))
+        }
+
+        let script = target.browser.isSafari
+            ? safariTargetMetadataScript(target: target)
+            : chromiumTargetMetadataScript(target: target)
+
+        switch runAppleScript(script) {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let value):
+            return parseTargetResponse(value, browser: target.browser, preservingID: target.id)
         }
     }
 
@@ -258,6 +260,35 @@ public final class BrowserVideoController: PlayerControlling {
         """
     }
 
+    private func chromiumTargetMetadataScript(target: PlayerTarget) -> String {
+        """
+        tell application "\(target.browser.appleScriptName)"
+          if not (exists window \(target.windowIndex)) then return "ERROR\tNo browser window"
+          tell window \(target.windowIndex)
+            if not (exists tab \(target.tabIndex)) then return "ERROR\tNo browser tab"
+            set theTitle to title of tab \(target.tabIndex)
+            set theURL to URL of tab \(target.tabIndex)
+            return "\(target.windowIndex)" & "\t" & "\(target.tabIndex)" & "\t" & theTitle & "\t" & theURL
+          end tell
+        end tell
+        """
+    }
+
+    private func safariTargetMetadataScript(target: PlayerTarget) -> String {
+        """
+        tell application "\(target.browser.appleScriptName)"
+          if not (exists window \(target.windowIndex)) then return "ERROR\tNo browser window"
+          tell window \(target.windowIndex)
+            if not (exists tab \(target.tabIndex)) then return "ERROR\tNo browser tab"
+            set theTab to tab \(target.tabIndex)
+            set theTitle to name of theTab
+            set theURL to URL of theTab
+            return "\(target.windowIndex)" & "\t" & "\(target.tabIndex)" & "\t" & theTitle & "\t" & theURL
+          end tell
+        end tell
+        """
+    }
+
     private func chromiumControlScript(target: PlayerTarget, javaScript: String) -> String {
         """
         tell application "\(target.browser.appleScriptName)"
@@ -291,6 +322,31 @@ public final class BrowserVideoController: PlayerControlling {
             return .failure(.scriptFailed(message))
         }
         return .success(result.stringValue ?? "")
+    }
+
+    private func parseTargetResponse(
+        _ value: String,
+        browser: BrowserKind,
+        preservingID id: UUID = UUID()
+    ) -> Result<PlayerTarget, PlayerControlError> {
+        let parts = value.components(separatedBy: "\t")
+        guard parts.count >= 4 else {
+            return .failure(.badResponse(value))
+        }
+        if parts[0] == "ERROR" {
+            return .failure(.noTarget(parts.dropFirst().joined(separator: " ")))
+        }
+        guard let windowIndex = Int(parts[0]), let tabIndex = Int(parts[1]) else {
+            return .failure(.badResponse(value))
+        }
+        return .success(PlayerTarget(
+            id: id,
+            browser: browser,
+            windowIndex: windowIndex,
+            tabIndex: tabIndex,
+            title: parts[2],
+            url: parts.dropFirst(3).joined(separator: "\t")
+        ))
     }
 
     static func escapeAppleScript(_ value: String) -> String {

@@ -2,6 +2,8 @@ import SwiftUI
 
 public struct FishStatsView: View {
     @ObservedObject private var store: AppStore
+    @State private var chartRange: WatchChartRange = .last7Days
+    @State private var historyMode: WatchHistoryMode = .visible
 
     public init(store: AppStore) {
         self.store = store
@@ -12,24 +14,26 @@ public struct FishStatsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 WatchCurveCard(
-                    title: store.text(.last14Days),
-                    days: store.watchHistoryByDay,
-                    language: store.language
+                    range: chartRange,
+                    points: points(for: chartRange),
+                    language: store.language,
+                    rangeSelection: $chartRange
                 )
-                recentSessions
+                historyControls
             }
         }
         .padding(.horizontal, 24)
         .padding(.top, 44)
         .padding(.bottom, 24)
-        .frame(minWidth: 680, minHeight: 500)
+        .frame(minWidth: 680, minHeight: historyMode == .hidden ? 430 : 500)
         .background(.thickMaterial)
+        .background(WindowHeightSetter(height: historyMode == .hidden ? 470 : 600))
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: "chart.xyaxis.line")
-                .font(.system(size: 26, weight: .semibold))
+            Image(systemName: historyMode == .masked ? "asterisk" : "chart.xyaxis.line")
+                .font(.system(size: historyMode == .masked ? 34 : 26, weight: .semibold))
                 .foregroundStyle(.teal)
                 .frame(width: 46, height: 46)
                 .background(.teal.opacity(0.12), in: Circle())
@@ -38,10 +42,10 @@ public struct FishStatsView: View {
                 Text(store.text(.fishStats))
                     .font(.system(size: 28, weight: .semibold))
                 if let activeWatchSession = store.activeWatchSession {
-                    Text("\(store.text(.activeNow)): \(activeWatchSession.title)")
+                    Text("\(store.text(.activeNow)): \(title(activeWatchSession.title, id: activeWatchSession.url))")
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                } else {
+                } else if historyMode != .hidden {
                     Text(store.text(.recentWatchSessions))
                         .foregroundStyle(.secondary)
                 }
@@ -60,24 +64,64 @@ public struct FishStatsView: View {
                         value: formatDuration(store.totalWatchDurationThisWeek)
                     )
                 }
-
-                Button(role: .destructive) {
-                    store.clearWatchHistory()
-                } label: {
-                    Label(store.text(.clearWatchHistory), systemImage: "trash")
-                }
-                .disabled(store.watchHistory.isEmpty && store.activeWatchSession == nil)
-                .controlSize(.small)
             }
         }
     }
 
-    private var recentSessions: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(store.text(.recentWatchSessions), systemImage: "clock.arrow.circlepath")
-                .font(.headline)
+    private var historyModeButton: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.22)) {
+                historyMode = historyMode.next
+            }
+        } label: {
+            Image(systemName: historyMode.systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+        }
+        .buttonStyle(.plain)
+        .help(historyMode.title(in: store.language))
+    }
 
-            if store.watchHistory.isEmpty {
+    private var historyControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                if historyMode != .hidden {
+                    Label(store.text(.recentWatchSessions), systemImage: "clock.arrow.circlepath")
+                        .font(.headline)
+                        .transition(.opacity)
+                }
+
+                Spacer()
+
+                if historyMode != .hidden {
+                    clearHistoryButton
+                }
+
+                historyModeButton
+            }
+
+            if historyMode != .hidden {
+                recentSessions
+            }
+        }
+    }
+
+    private var clearHistoryButton: some View {
+        Button(role: .destructive) {
+            store.clearWatchHistory()
+        } label: {
+            Label(store.text(.clearWatchHistory), systemImage: "trash")
+        }
+        .disabled(store.watchHistory.isEmpty && store.activeWatchSession == nil)
+        .controlSize(.small)
+        .frame(height: 26)
+    }
+
+    private var recentSessions: some View {
+        Group {
+            let groups = groupedWatchHistory
+            if groups.isEmpty {
                 ContentUnavailableView(
                     store.text(.noWatchHistory),
                     systemImage: "play.slash",
@@ -87,15 +131,138 @@ public struct FishStatsView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        ForEach(store.watchHistory.reversed().prefix(12)) { event in
-                            WatchSessionRow(event: event, language: store.language)
+                        ForEach(groups) { group in
+                            WatchSessionRow(
+                                group: group,
+                                title: title(group.title, id: group.id),
+                                language: store.language
+                            )
                         }
                     }
                     .padding(.vertical, 2)
                 }
             }
         }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
+
+    private var groupedWatchHistory: [WatchHistoryGroup] {
+        var groups: [String: WatchHistoryGroup] = [:]
+        for event in store.watchHistory {
+            let key = event.title
+            if var group = groups[key] {
+                group.duration += event.duration
+                group.count += 1
+                group.startedAt = max(group.startedAt, event.startedAt)
+                group.browserName = event.browserName
+                groups[key] = group
+            } else {
+                groups[key] = WatchHistoryGroup(
+                    id: key,
+                    title: event.title,
+                    browserName: event.browserName,
+                    startedAt: event.startedAt,
+                    duration: event.duration,
+                    count: 1
+                )
+            }
+        }
+        return groups.values.sorted { first, second in
+            first.startedAt > second.startedAt
+        }
+        .prefix(12)
+        .map { $0 }
+    }
+
+    private func points(for range: WatchChartRange) -> [VideoWatchPoint] {
+        switch range {
+        case .last7Days:
+            return store.watchHistoryLast7Days
+        case .last24Hours:
+            return store.watchHistoryLast24Hours
+        case .last60Minutes:
+            return store.watchHistoryLast60Minutes
+        }
+    }
+
+    private func title(_ value: String, id: String) -> String {
+        historyMode == .masked ? maskTitle(value, seed: stableSeed(id + value)) : value
+    }
+}
+
+private enum WatchChartRange: String, CaseIterable, Identifiable {
+    case last7Days
+    case last24Hours
+    case last60Minutes
+
+    var id: String { rawValue }
+
+    func title(in language: AppLanguage) -> String {
+        switch self {
+        case .last7Days:
+            return language.text(.last7Days)
+        case .last24Hours:
+            return language.text(.last24Hours)
+        case .last60Minutes:
+            return language.text(.last60Minutes)
+        }
+    }
+
+    var labelStyle: WatchChartLabelStyle {
+        switch self {
+        case .last7Days:
+            return .day
+        case .last24Hours:
+            return .hour
+        case .last60Minutes:
+            return .minute
+        }
+    }
+}
+
+private enum WatchHistoryMode {
+    case visible
+    case hidden
+    case masked
+
+    var next: WatchHistoryMode {
+        switch self {
+        case .visible:
+            return .hidden
+        case .hidden:
+            return .masked
+        case .masked:
+            return .visible
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .visible:
+            return "eye"
+        case .hidden:
+            return "eye.slash"
+        case .masked:
+            return "asterisk"
+        }
+    }
+
+    func title(in language: AppLanguage) -> String {
+        switch self {
+        case .visible:
+            return language.text(.historyVisibleMode)
+        case .hidden:
+            return language.text(.historyHiddenMode)
+        case .masked:
+            return language.text(.historyMaskedMode)
+        }
+    }
+}
+
+private enum WatchChartLabelStyle {
+    case day
+    case hour
+    case minute
 }
 
 private struct StatPill: View {
@@ -119,17 +286,25 @@ private struct StatPill: View {
 }
 
 private struct WatchCurveCard: View {
-    var title: String
-    var days: [VideoWatchDay]
+    var range: WatchChartRange
+    var points: [VideoWatchPoint]
     var language: AppLanguage
+    @Binding var rangeSelection: WatchChartRange
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(title)
-                    .font(.headline)
+                Picker("", selection: $rangeSelection) {
+                    ForEach(WatchChartRange.allCases) { range in
+                        Text(range.title(in: language)).tag(range)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 170)
+
                 Spacer()
-                Text(formatDuration(days.map(\.duration).max() ?? 0))
+
+                Text(formatDuration(points.map(\.duration).max() ?? 0))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -137,7 +312,7 @@ private struct WatchCurveCard: View {
             GeometryReader { proxy in
                 ZStack {
                     ChartGrid()
-                    WatchAreaShape(days: days)
+                    WatchAreaShape(points: points)
                         .fill(
                             LinearGradient(
                                 colors: [.teal.opacity(0.22), .blue.opacity(0.02)],
@@ -146,7 +321,7 @@ private struct WatchCurveCard: View {
                             )
                         )
 
-                    WatchCurveShape(days: days)
+                    WatchCurveShape(points: points)
                         .stroke(
                             LinearGradient(
                                 colors: [.teal, .blue],
@@ -157,7 +332,7 @@ private struct WatchCurveCard: View {
                         )
                         .shadow(color: .teal.opacity(0.18), radius: 6, y: 3)
 
-                    WatchPointDots(days: days)
+                    WatchPointDots(points: points)
                 }
                 .overlay(alignment: .bottom) {
                     chartLabels(width: proxy.size.width)
@@ -173,12 +348,12 @@ private struct WatchCurveCard: View {
 
     private func chartLabels(width: CGFloat) -> some View {
         HStack {
-            if let first = days.first {
-                Text(formatDay(first.date, language: language))
+            if let first = points.first {
+                Text(formatTick(first.date, style: range.labelStyle, language: language))
             }
             Spacer()
-            if let last = days.last {
-                Text(formatDay(last.date, language: language))
+            if let last = points.last {
+                Text(formatTick(last.date, style: range.labelStyle, language: language))
             }
         }
         .font(.caption2)
@@ -204,36 +379,36 @@ private struct ChartGrid: View {
 }
 
 private struct WatchCurveShape: Shape {
-    var days: [VideoWatchDay]
+    var points: [VideoWatchPoint]
 
     func path(in rect: CGRect) -> Path {
-        makeSmoothPath(days: days, in: rect, closesToBottom: false)
+        makeSmoothPath(points: points, in: rect, closesToBottom: false)
     }
 }
 
 private struct WatchAreaShape: Shape {
-    var days: [VideoWatchDay]
+    var points: [VideoWatchPoint]
 
     func path(in rect: CGRect) -> Path {
-        makeSmoothPath(days: days, in: rect, closesToBottom: true)
+        makeSmoothPath(points: points, in: rect, closesToBottom: true)
     }
 }
 
-private func makeSmoothPath(days: [VideoWatchDay], in rect: CGRect, closesToBottom: Bool) -> Path {
-    guard days.count > 1 else { return Path() }
-    let maxDuration = max(days.map(\.duration).max() ?? 0, 60)
-    let points = days.enumerated().map { index, day in
-        let x = rect.minX + (CGFloat(index) / CGFloat(days.count - 1)) * rect.width
-        let normalized = day.duration / maxDuration
+private func makeSmoothPath(points: [VideoWatchPoint], in rect: CGRect, closesToBottom: Bool) -> Path {
+    guard points.count > 1 else { return Path() }
+    let maxDuration = max(points.map(\.duration).max() ?? 0, 60)
+    let locations = points.enumerated().map { index, point in
+        let x = rect.minX + (CGFloat(index) / CGFloat(points.count - 1)) * rect.width
+        let normalized = point.duration / maxDuration
         let y = rect.maxY - CGFloat(normalized) * rect.height
         return CGPoint(x: x, y: y)
     }
 
     var path = Path()
-    path.move(to: points[0])
-    for index in 1..<points.count {
-        let previous = points[index - 1]
-        let current = points[index]
+    path.move(to: locations[0])
+    for index in 1..<locations.count {
+        let previous = locations[index - 1]
+        let current = locations[index]
         let delta = current.x - previous.x
         path.addCurve(
             to: current,
@@ -242,7 +417,7 @@ private func makeSmoothPath(days: [VideoWatchDay], in rect: CGRect, closesToBott
         )
     }
 
-    if closesToBottom, let first = points.first, let last = points.last {
+    if closesToBottom, let first = locations.first, let last = locations.last {
         path.addLine(to: CGPoint(x: last.x, y: rect.maxY))
         path.addLine(to: CGPoint(x: first.x, y: rect.maxY))
         path.closeSubpath()
@@ -252,7 +427,7 @@ private func makeSmoothPath(days: [VideoWatchDay], in rect: CGRect, closesToBott
 }
 
 private struct WatchPointDots: View {
-    var days: [VideoWatchDay]
+    var points: [VideoWatchPoint]
 
     var body: some View {
         GeometryReader { proxy in
@@ -272,19 +447,29 @@ private struct WatchPointDots: View {
     }
 
     private func chartPoints(in rect: CGRect) -> [(location: CGPoint, duration: TimeInterval)] {
-        guard days.count > 1 else { return [] }
-        let maxDuration = max(days.map(\.duration).max() ?? 0, 60)
-        return days.enumerated().map { index, day in
-            let x = rect.minX + (CGFloat(index) / CGFloat(days.count - 1)) * rect.width
-            let normalized = day.duration / maxDuration
+        guard points.count > 1 else { return [] }
+        let maxDuration = max(points.map(\.duration).max() ?? 0, 60)
+        return points.enumerated().map { index, point in
+            let x = rect.minX + (CGFloat(index) / CGFloat(points.count - 1)) * rect.width
+            let normalized = point.duration / maxDuration
             let y = rect.maxY - CGFloat(normalized) * rect.height
-            return (CGPoint(x: x, y: y), day.duration)
+            return (CGPoint(x: x, y: y), point.duration)
         }
     }
 }
 
+private struct WatchHistoryGroup: Identifiable {
+    var id: String
+    var title: String
+    var browserName: String
+    var startedAt: Date
+    var duration: TimeInterval
+    var count: Int
+}
+
 private struct WatchSessionRow: View {
-    var event: VideoWatchEvent
+    var group: WatchHistoryGroup
+    var title: String
     var language: AppLanguage
 
     var body: some View {
@@ -294,10 +479,10 @@ private struct WatchSessionRow: View {
                 .frame(width: 26)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(event.title)
+                Text(title)
                     .font(.headline)
                     .lineLimit(1)
-                Text("\(event.browserName) - \(formatDate(event.startedAt, language: language))")
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -305,13 +490,21 @@ private struct WatchSessionRow: View {
 
             Spacer()
 
-            Text(formatDuration(event.duration))
+            Text(formatDuration(group.duration))
                 .font(.callout.monospacedDigit().weight(.semibold))
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var subtitle: String {
+        let date = formatDate(group.startedAt, language: language)
+        guard group.count > 1 else {
+            return "\(group.browserName) - \(date)"
+        }
+        return "\(group.browserName) - \(date) - x\(group.count)"
     }
 }
 
@@ -323,10 +516,17 @@ private func formatDuration(_ interval: TimeInterval) -> String {
     return "\(minutes / 60)h \(minutes % 60)m"
 }
 
-private func formatDay(_ date: Date, language: AppLanguage) -> String {
+private func formatTick(_ date: Date, style: WatchChartLabelStyle, language: AppLanguage) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: language.rawValue)
-    formatter.setLocalizedDateFormatFromTemplate("MMM d")
+    switch style {
+    case .day:
+        formatter.setLocalizedDateFormatFromTemplate("MMM d")
+    case .hour:
+        formatter.setLocalizedDateFormatFromTemplate("HH:mm")
+    case .minute:
+        formatter.setLocalizedDateFormatFromTemplate("HH:mm")
+    }
     return formatter.string(from: date)
 }
 
@@ -336,4 +536,81 @@ private func formatDate(_ date: Date, language: AppLanguage) -> String {
     formatter.dateStyle = .medium
     formatter.timeStyle = .short
     return formatter.string(from: date)
+}
+
+private func maskTitle(_ value: String, seed: UInt64) -> String {
+    let characters = Array(value)
+    guard characters.count >= 2 else { return value }
+
+    let target = max(2, Int((Double(characters.count) * 0.4).rounded()))
+    var masked = Array(repeating: false, count: characters.count)
+    var generator = StableRandom(seed: seed)
+    var remaining = target
+    var attempts = 0
+
+    while remaining > 0 && attempts < characters.count * 5 {
+        attempts += 1
+        let start = generator.nextInt(upperBound: characters.count)
+        guard !characters[start].isWhitespace else { continue }
+        let maxLength = min(characters.count - start, max(2, remaining + 1))
+        guard maxLength >= 2 else { continue }
+        let length = min(max(2, generator.nextInt(upperBound: maxLength) + 1), remaining)
+        var applied = 0
+
+        for index in start..<min(start + length, characters.count) where !characters[index].isWhitespace && !masked[index] {
+            masked[index] = true
+            applied += 1
+        }
+        remaining -= applied
+    }
+
+    return String(characters.enumerated().map { index, character in
+        masked[index] ? "●" : character
+    })
+}
+
+private func stableSeed(_ value: String) -> UInt64 {
+    value.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { hash, byte in
+        (hash ^ UInt64(byte)) &* 1_099_511_628_211
+    }
+}
+
+private struct StableRandom {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        self.state = seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed
+    }
+
+    mutating func nextInt(upperBound: Int) -> Int {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var value = state
+        value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
+        value = value ^ (value >> 31)
+        return Int(value % UInt64(max(upperBound, 1)))
+    }
+}
+
+private struct WindowHeightSetter: NSViewRepresentable {
+    var height: CGFloat
+
+    func makeNSView(context: Context) -> NSView {
+        NSView()
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            let frame = window.frame
+            guard abs(frame.height - height) > 1 else { return }
+            let newFrame = CGRect(
+                x: frame.minX,
+                y: frame.maxY - height,
+                width: frame.width,
+                height: height
+            )
+            window.setFrame(newFrame, display: true, animate: true)
+        }
+    }
 }

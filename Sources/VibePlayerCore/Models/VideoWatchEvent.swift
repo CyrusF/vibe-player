@@ -41,6 +41,18 @@ public struct VideoWatchDay: Identifiable, Equatable, Sendable {
     public var id: Date { date }
 }
 
+public struct VideoWatchPoint: Identifiable, Equatable, Sendable {
+    public var date: Date
+    public var duration: TimeInterval
+
+    public init(date: Date, duration: TimeInterval) {
+        self.date = date
+        self.duration = duration
+    }
+
+    public var id: Date { date }
+}
+
 public struct ActiveVideoWatchSession: Equatable, Sendable {
     public var startedAt: Date
     public var title: String

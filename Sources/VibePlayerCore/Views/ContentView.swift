@@ -308,14 +308,31 @@ private struct PlayerTargetPanelView: View {
         Panel(title: store.text(.playerTarget), systemImage: "play.rectangle") {
             VStack(alignment: .leading, spacing: 12) {
                 if let target = store.selectedTarget {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(target.title)
-                            .font(.headline)
-                            .lineLimit(1)
-                        Text("\(target.browser.displayName) - \(target.url)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(target.title)
+                                .font(.headline)
+                                .lineLimit(1)
+                            Text("\(target.browser.displayName) - \(target.url)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Label(
+                                store.isPauseBypassActive ? store.text(.rightShiftPauseBypassActive) : store.text(.rightShiftPauseBypass),
+                                systemImage: "shift"
+                            )
+                                .font(.caption)
+                                .foregroundStyle(store.isPauseBypassActive ? .teal : .secondary)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            store.refreshSelectedTarget()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .help(store.text(.refreshTarget))
                     }
                 } else {
                     Text(store.text(.noBrowserVideoTargetSelected))
