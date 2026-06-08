@@ -1,4 +1,4 @@
-# Vibe Player
+<div align="center"><h1><img src="./Resources/vibep.png" alt="icon" style="width:100px" /><br>Vibe Player</h1></div>
 
 Vibe Player is a macOS 14+ menu bar utility for local, camera-based focus detection while watching video on a secondary display.
 
