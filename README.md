@@ -17,3 +17,7 @@ The MVP runs fully on-device:
 ```
 
 The script builds the SwiftPM executable, stages `dist/VibePlayer.app`, and launches it as a real macOS app bundle so camera and automation usage strings are present.
+
+## Star history
+
+[![Star History Chart](https://api.star-history.com/svg?repos=CyrusF/vibe-player&type=timeline&legend=top-left)](https://www.star-history.com/#CyrusF/vibe-player&type=timeline&legend=top-left)
