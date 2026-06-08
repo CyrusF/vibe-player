@@ -1,0 +1,25 @@
+# SwiftPM
+.build/
+.swiftpm/
+
+# Local app bundle output
+dist/
+
+# Local Codex app config
+.codex/
+
+# Xcode
+DerivedData/
+*.xcuserdata/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors
+*.swp
+*.swo
