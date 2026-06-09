@@ -6,6 +6,7 @@ public final class PreferencesStore {
         static let target = "target"
         static let selectedDisplayID = "selectedDisplayID"
         static let sensitivity = "sensitivity"
+        static let screenLayoutMode = "screenLayoutMode"
         static let mediaFallback = "mediaFallback"
         static let completedOnboarding = "completedOnboarding"
         static let appLanguage = "appLanguage"
@@ -55,6 +56,22 @@ public final class PreferencesStore {
             return value
         }
         set { defaults.set(newValue.rawValue, forKey: Key.sensitivity) }
+    }
+
+    public var screenLayoutMode: ScreenLayoutMode? {
+        get {
+            guard let raw = defaults.string(forKey: Key.screenLayoutMode) else {
+                return nil
+            }
+            return ScreenLayoutMode(rawValue: raw)
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue.rawValue, forKey: Key.screenLayoutMode)
+            } else {
+                defaults.removeObject(forKey: Key.screenLayoutMode)
+            }
+        }
     }
 
     public var mediaFallbackEnabled: Bool {

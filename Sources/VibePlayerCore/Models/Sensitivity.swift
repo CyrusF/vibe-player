@@ -65,22 +65,22 @@ public enum Sensitivity: String, CaseIterable, Codable, Identifiable, Sendable {
     var farDistanceRatio: Double {
         switch self {
         case .conservative:
-            return 0.76
+            return 0.72
         case .balanced:
-            return 0.68
+            return 0.64
         case .fast:
-            return 0.60
+            return 0.56
         }
     }
 
     var nearDistanceRatio: Double {
         switch self {
         case .conservative:
-            return 1.32
+            return 1.38
         case .balanced:
-            return 1.45
+            return 1.55
         case .fast:
-            return 1.60
+            return 1.70
         }
     }
 
@@ -92,6 +92,17 @@ public enum Sensitivity: String, CaseIterable, Codable, Identifiable, Sendable {
             return 4
         case .fast:
             return 3
+        }
+    }
+
+    var playRegionOvershootPenalty: Double {
+        switch self {
+        case .conservative:
+            return 0.20
+        case .balanced:
+            return 0.18
+        case .fast:
+            return 0.15
         }
     }
 }

@@ -21,6 +21,12 @@ public final class AppStore: ObservableObject {
             decisionEngine.reset()
         }
     }
+    @Published public var screenLayoutMode: ScreenLayoutMode? {
+        didSet {
+            preferences.screenLayoutMode = screenLayoutMode
+            decisionEngine.reset()
+        }
+    }
     @Published public var mediaKeyFallbackEnabled: Bool {
         didSet {
             preferences.mediaFallbackEnabled = mediaKeyFallbackEnabled
@@ -34,8 +40,10 @@ public final class AppStore: ObservableObject {
     }
     @Published public private(set) var isDetectionEnabled = false
     @Published public private(set) var status: DetectionStatus = .unknown
+    @Published public private(set) var visualStatus: DetectionStatus = .unknown
     @Published public private(set) var statusDetail = "Ready."
     @Published public private(set) var lastScore: Double?
+    @Published public private(set) var currentFaceFeature: FaceFeatures?
     @Published public private(set) var calibrationDraft = CalibrationDraft()
     @Published public private(set) var activeCalibrationClip: CalibrationClip?
     @Published public private(set) var calibrationProgress: Double = 0
@@ -44,6 +52,7 @@ public final class AppStore: ObservableObject {
     @Published public private(set) var watchHistory: [VideoWatchEvent]
     @Published public private(set) var activeWatchSession: ActiveVideoWatchSession?
     @Published public private(set) var isPauseBypassActive = false
+    @Published public private(set) var shouldShowScreenLayoutModeLaunchNotice: Bool
 
     public let cameraMonitor: CameraFocusMonitor
 
@@ -58,6 +67,7 @@ public final class AppStore: ObservableObject {
     private var lastAutoPausedTargetID: UUID?
     private var pendingResumeTargetID: UUID?
     private var captureSamples: [FaceFeatures] = []
+    private var captureErrors: [FaceDetectionError] = []
     private var captureTask: Task<Void, Never>?
     private var resumeRetryTask: Task<Void, Never>?
     private var modifierMonitors: [Any] = []
@@ -87,12 +97,22 @@ public final class AppStore: ObservableObject {
         self.mediaKeyService = mediaKeyService
         self.now = now
 
+        let storedCalibration = preferences.calibration
+        let storedScreenLayoutMode = preferences.screenLayoutMode
+        let initialScreenLayoutMode = storedScreenLayoutMode ?? storedCalibration?.recommendedScreenLayoutMode
+        let shouldShowScreenLayoutModeLaunchNotice = storedCalibration != nil && storedScreenLayoutMode == nil
+
         self.permissions = permissionService.snapshot()
         self.displays = displayService.displays()
         self.selectedDisplayID = preferences.selectedDisplayID ?? displayService.recommendedDisplayID()
         self.selectedTarget = preferences.target
-        self.calibration = preferences.calibration
+        self.calibration = storedCalibration
         self.sensitivity = preferences.sensitivity
+        self.screenLayoutMode = initialScreenLayoutMode
+        self.shouldShowScreenLayoutModeLaunchNotice = shouldShowScreenLayoutModeLaunchNotice
+        if shouldShowScreenLayoutModeLaunchNotice {
+            preferences.screenLayoutMode = initialScreenLayoutMode
+        }
         self.mediaKeyFallbackEnabled = preferences.mediaFallbackEnabled
         let appLanguage = preferences.appLanguage
         self.language = appLanguage
@@ -126,6 +146,26 @@ public final class AppStore: ObservableObject {
 
     public func sensitivityTitle(_ sensitivity: Sensitivity) -> String {
         language.sensitivityTitle(sensitivity)
+    }
+
+    public func screenLayoutModeTitle(_ mode: ScreenLayoutMode) -> String {
+        language.screenLayoutModeTitle(mode)
+    }
+
+    public func screenLayoutModeHelp(_ mode: ScreenLayoutMode) -> String {
+        language.screenLayoutModeHelp(mode)
+    }
+
+    public func calibrationSavedText(screenLayoutMode: ScreenLayoutMode) -> String {
+        language.calibrationSavedText(screenLayoutMode)
+    }
+
+    public var screenLayoutModeLaunchNoticeTitle: String {
+        language.screenLayoutModeLaunchNoticeTitle
+    }
+
+    public var screenLayoutModeLaunchNoticeMessage: String {
+        language.screenLayoutModeLaunchNoticeMessage(screenLayoutMode)
     }
 
     public func calibrationClipTitle(_ clip: CalibrationClip) -> String {
@@ -188,6 +228,15 @@ public final class AppStore: ObservableObject {
     public func setLanguage(_ language: AppLanguage) {
         guard self.language != language else { return }
         self.language = language
+    }
+
+    public func setScreenLayoutMode(_ mode: ScreenLayoutMode) {
+        guard screenLayoutMode != mode else { return }
+        screenLayoutMode = mode
+    }
+
+    public func dismissScreenLayoutModeLaunchNotice() {
+        shouldShowScreenLayoutModeLaunchNotice = false
     }
 
     public func refresh() {
@@ -324,6 +373,7 @@ public final class AppStore: ObservableObject {
 
         captureTask?.cancel()
         captureSamples.removeAll()
+        captureErrors.removeAll()
         activeCalibrationClip = clip
         calibrationProgress = 0
         calibrationMessage = language.recordingClip(clip)
@@ -352,8 +402,10 @@ public final class AppStore: ObservableObject {
 
         let samples = captureSamples
         captureSamples.removeAll()
+        let errors = captureErrors
+        captureErrors.removeAll()
         guard samples.count >= FocusCalibration.minimumSamplesPerClip else {
-            calibrationMessage = language.clipInvalidNotEnoughSamples(clip)
+            calibrationMessage = language.calibrationCaptureFailureDescription(errors.primaryCalibrationFailure)
             return
         }
 
@@ -375,6 +427,7 @@ public final class AppStore: ObservableObject {
                 let built = try calibrationDraft.build()
                 calibration = built
                 preferences.calibration = built
+                screenLayoutMode = built.recommendedScreenLayoutMode
                 calibrationMessage = text(.calibrationComplete)
                 cameraMonitor.stop()
             } catch {
@@ -384,8 +437,19 @@ public final class AppStore: ObservableObject {
     }
 
     private func handleFeature(_ result: Result<FaceFeatures, FaceDetectionError>) {
-        if activeCalibrationClip != nil, case .success(let feature) = result {
-            captureSamples.append(feature)
+        if case .success(let feature) = result {
+            currentFaceFeature = feature
+        } else {
+            currentFaceFeature = nil
+        }
+
+        if activeCalibrationClip != nil {
+            switch result {
+            case .success(let feature):
+                captureSamples.append(feature)
+            case .failure(let error):
+                captureErrors.append(error)
+            }
         }
 
         guard isDetectionEnabled else { return }
@@ -393,9 +457,11 @@ public final class AppStore: ObservableObject {
             feature: result,
             calibration: calibration,
             sensitivity: sensitivity,
+            layoutMode: screenLayoutMode,
             language: language
         )
         status = decision.status
+        visualStatus = decision.visualStatus
         statusDetail = decision.message
         lastScore = decision.score
 
@@ -455,7 +521,7 @@ public final class AppStore: ObservableObject {
             if mediaKeyFallbackEnabled {
                 mediaKeyService.sendPlayPause()
                 lastAutoPausedTargetID = target.id
-                statusDetail = language.sentMediaFallback(after: language.playerControlErrorDescription(error))
+                statusDetail = text(.pausedSelectedVideo)
                 finishActiveWatchSession(at: eventDate)
             } else {
                 statusDetail = language.playerControlErrorDescription(error)
@@ -485,7 +551,7 @@ public final class AppStore: ObservableObject {
         case .failure(let error):
             if mediaKeyFallbackEnabled {
                 mediaKeyService.sendPlayPause()
-                statusDetail = language.sentMediaFallback(after: language.playerControlErrorDescription(error))
+                statusDetail = isAppResume ? text(.resumedSelectedVideo) : text(.startedSelectedVideo)
                 beginWatchSessionIfNeeded(target: target, at: eventDate)
                 scheduleResumeVerification(target: target, attemptsRemaining: 0)
             } else {
@@ -545,7 +611,7 @@ public final class AppStore: ObservableObject {
         case .failure(let error):
             if mediaKeyFallbackEnabled {
                 mediaKeyService.sendPlayPause()
-                statusDetail = language.sentMediaFallback(after: language.playerControlErrorDescription(error))
+                statusDetail = text(.resumedSelectedVideo)
                 scheduleMediaKeyResumeConfirmation(target: target)
             } else {
                 statusDetail = language.playerControlErrorDescription(error)
@@ -812,5 +878,49 @@ public final class AppStore: ObservableObject {
             guard let date = calendar.date(byAdding: component, value: offset, to: start) else { return nil }
             return VideoWatchPoint(date: date, duration: buckets[date, default: 0])
         }
+    }
+}
+
+private extension Array where Element == FaceDetectionError {
+    var primaryCalibrationFailure: FaceDetectionError? {
+        guard !isEmpty else { return nil }
+
+        let candidates: [(error: FaceDetectionError, priority: Int)] = [
+            (.multipleFaces, 0),
+            (.faceTooSmall, 1),
+            (.missingLandmarks, 2),
+            (.missingEyes, 3),
+            (.noFace, 4)
+        ]
+        return candidates
+            .map { candidate in
+                (error: candidate.error, priority: candidate.priority, count: count(of: candidate.error))
+            }
+            .filter { $0.count > 0 }
+            .sorted {
+                if $0.count == $1.count {
+                    return $0.priority < $1.priority
+                }
+                return $0.count > $1.count
+            }
+            .first?
+            .error ?? first
+    }
+
+    private func count(of target: FaceDetectionError) -> Int {
+        filter { error in
+            switch (error, target) {
+            case (.multipleFaces, .multipleFaces),
+                 (.faceTooSmall, .faceTooSmall),
+                 (.missingLandmarks, .missingLandmarks),
+                 (.missingEyes, .missingEyes),
+                 (.noFace, .noFace):
+                return true
+            case (.extractionFailed, .extractionFailed):
+                return true
+            default:
+                return false
+            }
+        }.count
     }
 }

@@ -145,13 +145,15 @@ public final class OverlayService {
         glowWindow = window
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
+            context.duration = 0.30
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().alphaValue = 1
         } completionHandler: {
             DispatchQueue.main.asyncAfter(deadline: .now() + style.duration) { [weak self, weak window] in
                 guard let window else { return }
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.24
+                    context.duration = 0.42
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                     window.animator().alphaValue = 0
                 } completionHandler: {
                     window.orderOut(nil)
@@ -190,7 +192,8 @@ public final class OverlayService {
         persistentGlowWindow = window
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = 0.28
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().alphaValue = 1
         }
     }
@@ -199,7 +202,8 @@ public final class OverlayService {
         guard let window = persistentGlowWindow else { return }
         persistentGlowWindow = nil
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
+            context.duration = 0.38
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().alphaValue = 0
         } completionHandler: {
             window.orderOut(nil)

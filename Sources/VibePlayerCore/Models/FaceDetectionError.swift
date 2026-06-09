@@ -1,6 +1,6 @@
 import Foundation
 
-public enum FaceDetectionError: LocalizedError, Equatable, Sendable {
+public enum FaceDetectionError: LocalizedError, Equatable, Hashable, Sendable {
     case noFace
     case multipleFaces
     case missingLandmarks

@@ -57,6 +57,11 @@ public enum AppTextKey: Sendable {
     case calibration
     case calibrationSaved
     case resetCalibration
+    case screenLayoutConfirmationTitle
+    case screenLayoutConfirmationMessage
+    case confirmLayout
+    case confirmLayoutAndResetCalibration
+    case gotIt
     case recording
     case playerTarget
     case detectionSettings
@@ -159,6 +164,68 @@ public extension AppLanguage {
         }
     }
 
+    func screenLayoutModeTitle(_ mode: ScreenLayoutMode) -> String {
+        switch (self, mode) {
+        case (.english, .horizontal):
+            return "Horizontal Layout"
+        case (.english, .vertical):
+            return "Vertical Layout"
+        case (.english, .mixed):
+            return "Mixed Layout"
+        case (.chinese, .horizontal):
+            return "横向布局"
+        case (.chinese, .vertical):
+            return "纵向布局"
+        case (.chinese, .mixed):
+            return "混合布局"
+        }
+    }
+
+    func screenLayoutModeHelp(_ mode: ScreenLayoutMode) -> String {
+        switch (self, mode) {
+        case (.english, .horizontal):
+            return "Ignore small vertical movement"
+        case (.english, .vertical):
+            return "Ignore small horizontal movement"
+        case (.english, .mixed):
+            return "Stricter diagonal movement"
+        case (.chinese, .horizontal):
+            return "忽略小幅纵向波动"
+        case (.chinese, .vertical):
+            return "忽略小幅横向波动"
+        case (.chinese, .mixed):
+            return "斜向移动更稳健"
+        }
+    }
+
+    func calibrationSavedText(_ mode: ScreenLayoutMode) -> String {
+        switch self {
+        case .english:
+            return "Calibration saved, automatically selected \(screenLayoutModeTitle(mode))."
+        case .chinese:
+            return "校准已保存，已自动选择\(screenLayoutModeTitle(mode))。"
+        }
+    }
+
+    var screenLayoutModeLaunchNoticeTitle: String {
+        switch self {
+        case .english:
+            return "Screen Layout Is Here"
+        case .chinese:
+            return "屏幕布局上线了"
+        }
+    }
+
+    func screenLayoutModeLaunchNoticeMessage(_ mode: ScreenLayoutMode?) -> String {
+        let modeText = mode.map(screenLayoutModeTitle) ?? text(.unknown)
+        switch self {
+        case .english:
+            return "Recommended \(modeText) from your last calibration. Recalibrate if your desk setup changed."
+        case .chinese:
+            return "已根据上次校准推荐\(modeText)。如果工作台发生变化，记得重新校准哦"
+        }
+    }
+
     func calibrationClipTitle(_ clip: CalibrationClip) -> String {
         switch clip {
         case .play:
@@ -199,15 +266,6 @@ public extension AppLanguage {
             return "Recording \(calibrationClipTitle(clip))."
         case .chinese:
             return "正在录制\(calibrationClipTitle(clip))。"
-        }
-    }
-
-    func clipInvalidNotEnoughSamples(_ clip: CalibrationClip) -> String {
-        switch self {
-        case .english:
-            return "\(calibrationClipTitle(clip)) invalid: not enough clear face samples."
-        case .chinese:
-            return "\(calibrationClipTitle(clip))无效：清晰人脸样本不足。"
         }
     }
 
@@ -260,21 +318,43 @@ public extension AppLanguage {
 
     func faceDetectionErrorDescription(_ error: FaceDetectionError) -> String {
         switch (self, error) {
-        case (.english, _):
-            return error.localizedDescription
+        case (.english, .noFace):
+            return "Unable to read gaze information."
+        case (.english, .multipleFaces):
+            return "Multiple faces on screen are too similar to distinguish."
+        case (.english, .missingLandmarks):
+            return "Face is incomplete."
+        case (.english, .missingEyes):
+            return "Unable to read gaze information."
+        case (.english, .faceTooSmall):
+            return "Face is too small."
+        case (.english, .extractionFailed(let message)):
+            return translatedExtractionFailure(message)
         case (.chinese, .noFace):
-            return "未检测到人脸。"
+            return "无法识别眼神信息。"
         case (.chinese, .multipleFaces):
-            return "检测到多张人脸。"
+            return "屏幕中有无法区分的多张人脸。"
         case (.chinese, .missingLandmarks):
-            return "未检测到人脸关键点。"
+            return "人脸不完整。"
         case (.chinese, .missingEyes):
-            return "眼睛检测不够清晰。"
+            return "无法识别眼神信息。"
         case (.chinese, .faceTooSmall):
-            return "人脸太小或距离太远。"
+            return "人脸太小。"
         case (.chinese, .extractionFailed(let message)):
             return translatedExtractionFailure(message)
         }
+    }
+
+    func calibrationCaptureFailureDescription(_ error: FaceDetectionError?) -> String {
+        guard let error else {
+            switch self {
+            case .english:
+                return "Unable to read gaze information."
+            case .chinese:
+                return "无法识别眼神信息。"
+            }
+        }
+        return faceDetectionErrorDescription(error)
     }
 
     func calibrationErrorDescription(_ error: CalibrationError) -> String {
@@ -417,6 +497,16 @@ public extension AppLanguage {
             return "Calibration saved"
         case .resetCalibration:
             return "Reset Calibration"
+        case .screenLayoutConfirmationTitle:
+            return "Confirm Screen Layout"
+        case .screenLayoutConfirmationMessage:
+            return "Calibration tried to identify the screen layout. If your desk setup changed, recalibrate when you can."
+        case .confirmLayout:
+            return "Confirm Layout"
+        case .confirmLayoutAndResetCalibration:
+            return "Confirm Layout and Reset Calibration"
+        case .gotIt:
+            return "Got It"
         case .recording:
             return "Recording"
         case .playerTarget:
@@ -582,6 +672,16 @@ public extension AppLanguage {
             return "校准已保存"
         case .resetCalibration:
             return "重置校准"
+        case .screenLayoutConfirmationTitle:
+            return "确认屏幕布局"
+        case .screenLayoutConfirmationMessage:
+            return "校准时已尝试识别屏幕布局。如果工作台发生变化，记得重新校准哦"
+        case .confirmLayout:
+            return "确认布局"
+        case .confirmLayoutAndResetCalibration:
+            return "确认布局并重置校准"
+        case .gotIt:
+            return "知道了"
         case .recording:
             return "录制中"
         case .playerTarget:
@@ -690,6 +790,9 @@ public extension AppLanguage {
     }
 
     private func translatedExtractionFailure(_ message: String) -> String {
+        guard self == .chinese else {
+            return message
+        }
         switch message {
         case "No camera device found.":
             return "未找到摄像头设备。"

@@ -6,6 +6,7 @@ import Vision
 
 public final class VisionFeatureExtractor {
     private let minimumFaceHeight: Double = 0.045
+    private static let primaryFaceDominanceRatio: CGFloat = 1.35
 
     public init() {}
 
@@ -26,9 +27,13 @@ public final class VisionFeatureExtractor {
         guard let faces = request.results else {
             return .failure(.noFace)
         }
-        guard faces.count == 1, let face = faces.first else {
-            return faces.isEmpty ? .failure(.noFace) : .failure(.multipleFaces)
+        guard !faces.isEmpty else {
+            return .failure(.noFace)
         }
+        guard let primaryIndex = Self.primaryFaceIndex(in: faces.map(\.boundingBox)) else {
+            return .failure(.multipleFaces)
+        }
+        let face = faces[primaryIndex]
         guard face.boundingBox.height >= minimumFaceHeight else {
             return .failure(.faceTooSmall)
         }
@@ -135,5 +140,23 @@ public final class VisionFeatureExtractor {
         let dx = lhs.x - rhs.x
         let dy = lhs.y - rhs.y
         return Double(sqrt((dx * dx) + (dy * dy)))
+    }
+
+    static func primaryFaceIndex(in boundingBoxes: [CGRect]) -> Int? {
+        guard !boundingBoxes.isEmpty else { return nil }
+        guard boundingBoxes.count > 1 else { return 0 }
+
+        let ranked = boundingBoxes.enumerated()
+            .map { index, box in
+                (index: index, area: box.width * box.height)
+            }
+            .sorted { $0.area > $1.area }
+        guard let primary = ranked.first, let secondary = ranked.dropFirst().first else {
+            return ranked.first?.index
+        }
+        guard primary.area >= max(0.0001, secondary.area) * primaryFaceDominanceRatio else {
+            return nil
+        }
+        return primary.index
     }
 }
